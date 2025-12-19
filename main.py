@@ -16,19 +16,29 @@ VAL_DIR = "dataset/valid_together"  # folder with images and .txt labels
 
 assembly_steps = [
     "Step 1: Place keyboard case",
-    "Step 2: Install PCB and mounting plate (if applicable)",
-    "Step 3: Attach stabilizers",
-    "Step 4: Install switches",
-    "Step 5: Install keycaps"
+    "Step 2: Install PCB, stabilizers and mounting plate (if applicable)",
+    "Step 3: Install switches",
+    "Step 4: Install keycaps",
+    "Step 5: Completed!"
 ]
 
 instruction_images = [
     cv2.imread("instruction_images/case.jpg"),
     cv2.imread("instruction_images/pcb_installed.png"),
-    cv2.imread("instruction_images/stabs_installed.webp"),
     cv2.imread("instruction_images/switches_installed.jpg"),
+    cv2.imread("instruction_images/keycap.jpg"),
     cv2.imread("instruction_images/final.webp")
 ]
+
+STEP_RULES = {
+    1: {"keyboard"},             
+    2: {"case", "pcb", "keyboard"},          
+    3: {"case", "pcb", "keyboard", "switch"},               
+    4: {"keycap"},              
+}
+
+STEP_CONFIRM_SECONDS = 1.5
+step_confirm_start = None
 
 # Toggle terminal output (set to False to silence detection/evaluation prints)
 VERBOSE = True
@@ -38,9 +48,10 @@ WINDOW_HEIGHT = 720
 
 # Load models
 models = [
-    YOLO("human_model.pt"),
+    YOLO('human_model.pt'),
+    YOLO('keyboard_model.pt'),
     YOLO('screw_model.pt'),
-    YOLO('keyboard_model.pt')
+    YOLO('runs/detect/train20/weights/best.pt')
 ]
 
 model_class_names = {
@@ -55,8 +66,42 @@ model_class_names = {
     60: "face", 61: "person", 62: "key-switch", 63: "hand", 64: "case", 65: "pcb", 66: "screw"
 }
 
+KEYCAP_LABELS = {
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n",
+    "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+    "shift-left", "shift-lock", "shift-right", "space", "ss", "strg-left", "strg-right", "alt-left", "altgr-right",
+    "less", "minus", "oe", "plus", "hash", "caret", "point", "comma", "enter", "tab", "accent", "del", "ue"
+}
+
 # Reverse map
 id_to_label = {i: name for i, name in model_class_names.items()}
+
+def step_condition_met(step_index, seen_labels):
+    required = STEP_RULES.get(step_index, set())
+    return required.issubset(seen_labels)
+
+def best_step_from_detections(seen_labels, detected_keycaps):
+    has_case = "keyboard" in seen_labels
+    has_pcb = "pcb" in seen_labels
+    has_keycap = "keycap" in seen_labels
+
+    if has_keycap and has_case and len(detected_keycaps) > 25:
+        return 4  # Step 5: Completed
+
+    if has_case and len(detected_keycaps) < 25:
+        return 3  # Step 4: Install Keycaps
+
+    if has_case and has_pcb:
+        return 2  # Step 3 Switch installation
+
+    if has_case:
+        return 1  # Step 2
+
+    if not has_case:
+        return 0  # Step 1
+
+    return 0
 
 def draw_progress_bar(img, progress):
     bar_x, bar_y = 40, 140
@@ -86,11 +131,6 @@ def make_dashboard(step, progress):
                 f"Progress: {int(progress*100)}%",
                 (40, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                 (255,255,255), 2)
-
-    cv2.putText(dashboard,
-                "Press 1-5 to simulate detection",
-                (40, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                (180,180,180), 1)
     
     img = instruction_images[step]
     if img is not None:
@@ -101,7 +141,7 @@ def make_dashboard(step, progress):
 def main():
     TOTAL_STEPS = len(assembly_steps)
     current_step = 0
-
+    target_step = 0
     random.seed(42) 
     colors = {}
     for i in range(67):
@@ -127,9 +167,18 @@ def main():
         )
 
         annotated_frame = frame.copy()
+        seen = set()
+        detected_keycaps = set()
+
         for (x1, y1, x2, y2), label, score in zip(pred_boxes, pred_labels, pred_scores):
             color = colors[label]
+            string = f"{id_to_label.get(label, str(label))}"
             label_text = f"{id_to_label.get(label, str(label))} {score:.2f}"
+            if string in KEYCAP_LABELS:
+                seen.add("keycap")
+                detected_keycaps.add(string)
+            else:
+                seen.add(string)
 
             cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
             cv2.putText(
@@ -142,13 +191,23 @@ def main():
                 2,
             )
 
-            cv2.putText(frame,
-                "Simulate detection: Press keys 1-5   |   Q = Quit",
-                (40, 170),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (255, 255, 255),
-                2)
+        #print(seen)
+        suggested_step = best_step_from_detections(seen, detected_keycaps)
+
+        # If YOLO suggests a different step than we're currently showing,
+        # require it to be stable for TARGET_CONFIRM_SECONDS before switching.
+        if suggested_step != current_step:
+            if target_step != suggested_step:
+                target_step = suggested_step
+                target_confirm_start = time.time()
+            else:
+                if target_confirm_start is not None and (time.time() - target_confirm_start) >= STEP_CONFIRM_SECONDS:
+                    current_step = target_step
+                    target_confirm_start = None
+        else:
+            # No change needed
+            target_step = current_step
+            target_confirm_start = None
             
         progress = current_step / (TOTAL_STEPS - 1)
         dashboard = make_dashboard(current_step, progress)
