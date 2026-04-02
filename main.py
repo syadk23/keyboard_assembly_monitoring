@@ -48,30 +48,28 @@ WINDOW_HEIGHT = 720
 
 # Load models
 models = [
-    YOLO('human_model.pt'),
-    YOLO('keyboard_model.pt'),
-    YOLO('screw_model.pt'),
-    YOLO('runs/detect/train20/weights/best.pt')
+    YOLO('runs/detect/train34/weights/best.pt'),
+    YOLO('screw_model.pt')
 ]
 
+# Must match dataset/data.yaml exactly (11 classes, 0–10). Model outputs these IDs.
 model_class_names = {
-    0: "0", 1: "1", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8", 9: "9",
-    10: "a", 11: "accent", 12: "ae", 13: "alt-left", 14: "altgr-right", 15: "b",
-    16: "c", 17: "caret", 18: "comma", 19: "d", 20: "del", 21: "e", 22: "enter", 23: "f",
-    24: "g", 25: "h", 26: "hash", 27: "i", 28: "j", 29: "k", 30: "keyboard", 31: "l",
-    32: "less", 33: "m", 34: "minus", 35: "n", 36: "o", 37: "oe", 38: "p", 39: "plus",
-    40: "point", 41: "q", 42: "r", 43: "s", 44: "shift-left", 45: "shift-lock",
-    46: "shift-right", 47: "space", 48: "ss", 49: "strg-left", 50: "strg-right",
-    51: "t", 52: "tab", 53: "u", 54: "ue", 55: "v", 56: "w", 57: "x", 58: "y", 59: "z",
-    60: "face", 61: "person", 62: "key-switch", 63: "hand", 64: "case", 65: "pcb", 66: "screw"
+    0: "a",
+    1: "d",
+    2: "s",
+    3: "w",
+    4: "face",
+    5: "person",
+    6: "key-switch",
+    7: "hand",
+    8: "case",
+    9: "pcb",
+    10: "screw",
+    11: "switch"
 }
 
 KEYCAP_LABELS = {
-    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
-    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n",
-    "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
-    "shift-left", "shift-lock", "shift-right", "space", "ss", "strg-left", "strg-right", "alt-left", "altgr-right",
-    "less", "minus", "oe", "plus", "hash", "caret", "point", "comma", "enter", "tab", "accent", "del", "ue"
+    "a", "d", "s", "w",
 }
 
 # Reverse map
@@ -82,7 +80,7 @@ def step_condition_met(step_index, seen_labels):
     return required.issubset(seen_labels)
 
 def best_step_from_detections(seen_labels, detected_keycaps):
-    has_case = "keyboard" in seen_labels
+    has_case = "keyboard" in seen_labels or "case" in seen_labels
     has_pcb = "pcb" in seen_labels
     has_keycap = "keycap" in seen_labels
 
@@ -161,7 +159,11 @@ def main():
         if not ret:
             break
 
-        boxes_all, scores_all, labels_all = run_all_models(frame)
+        boxes_all, scores_all, labels_all = run_all_models(
+            frame,
+            models_override=models,
+            model_class_names_override=model_class_names,
+        )
         pred_boxes, pred_scores, pred_labels = fuse_predictions(
             boxes_all, scores_all, labels_all, frame.shape
         )

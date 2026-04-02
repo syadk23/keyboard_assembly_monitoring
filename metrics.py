@@ -117,9 +117,13 @@ def evaluate_model(model, model_name):
 
         return precision.item(), recall.item(), f1.item()
 
-def run_all_models(frame):
+def run_all_models(frame, models_override=None, model_class_names_override=None):
+    """Run all models on frame. Optionally use custom models and class names (e.g. 11-class setup)."""
+    use_models = models_override if models_override is not None else models
+    use_names = model_class_names_override if model_class_names_override is not None else model_class_names
+
     boxes_all, scores_all, labels_all = [], [], []
-    for i, model in enumerate(models):
+    for i, model in enumerate(use_models):
         # Call model with verbose=False and additionally suppress stdout/stderr
         if not VERBOSE:
             with open(os.devnull, 'w') as fnull:
@@ -133,7 +137,7 @@ def run_all_models(frame):
             conf = float(box.conf.item())
             class_id = int(box.cls.item())
 
-            if class_id not in model_class_names:
+            if class_id not in use_names:
                 continue
 
             box_norm = [x1 / frame.shape[1], y1 / frame.shape[0],
